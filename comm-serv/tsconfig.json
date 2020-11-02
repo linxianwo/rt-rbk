@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig-serve.json",
+  "compilerOptions": {
+    "outDir": "../dist", // this dir generated output structure depends on ts import, one dir generated different from more than one, modify the path when necessary.
+    "allowJs": true,
+    "downlevelIteration": true,
+  },
+  "include": [
+    ".",
+    "buffer-builder.js",
+  ],
+  "exclude": [
+    "**/*.spec.ts"
+  ]
+}
