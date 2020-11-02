@@ -1,0 +1,3 @@
+dist/test/unit/beteng-serv/routes
+dist/test/unit/share/methods/
+--recursive
