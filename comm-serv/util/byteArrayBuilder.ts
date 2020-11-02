@@ -1,917 +1,1431 @@
-import { randomBytes } from "crypto";
-export enum FillType { // TODO:font size value
-  TRIM = 0,
-  X1,
-  RACE,
-  POOL,
-  BANK,
-  SELN,
-  FORMULAR,
-  VALUE,
+import BufferBuilder = require('./buffer-builder');
+import { Constansts } from '../../share/models/comm-serv/CommonDefs';
+import { ComSvrException } from './comSvrException';
+import { logger } from '../../share/utils/logs';
+import { isEmpty } from 'ng-zorro-antd';
+import { ERROR_MSG } from '../../share/models/response-common';
+
+export enum DateFormatType {
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 81
+    /// </summary>
+    YY,
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 25DEC81
+    /// </summary>
+    DDMMMYY,
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 25_DEC_81
+    /// </summary>
+    DD_MMM_YY,
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 25_DEC
+    /// </summary>
+    DD_MMM,
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 251281
+    /// </summary>
+    DDMMYY,
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 25_12_81
+    /// </summary>
+    DD_MM_YY,
+    /// <summary>
+    /// eg. Datetime:1981-12-25 10:15:18  return 1015
+    /// </summary>
+    HHMM,
 }
-export enum RuleType { // TODO:font size value
-  NON = 0,
-  RACE_EQ_FORMULAR_LEG,
-  POOL_WP_QQP, // if pool=2,must be wp or qqp
-  POOL_WP_QQP_CWA,
-  WIN_PLA_WQ_NOBANK, // if pool = win or pla or wq ,then no bank,del bank pool
-  WIN_PLA_WQ_NOBANK_CWA,
-  ONLY_ONE_RACE_FORMULA, // FCT,TCE,QTT   Race=1 Formula=1
-  ONLY_ONE_RACE_FORMULA_SELN, // FCT,TCE,QTT seln rule
-  FF_TRI_DT_TT,
-  POOL_EQ_LEG,
+export enum PadOption {
+    Before,
+    After,
 }
-enum CCType { // TODO:font size value
-  NON = 0,
-  S,
-  M, // if pool=2,must be wp or qqp
-  B, // if pool = win or pla or wq ,then no bank,del bank pool
-  BM, // FCT,TCE,QTT   Race=1 Formula=1
-  MB, // FCT,TCE,QTT seln rule
-}
-enum TRIType { // TODO:font size value
-  FF = 0,
-  TRI,
-  DT, // if pool=2,must be wp or qqp
-  TT, // if pool = win or pla or wq ,then no bank,del bank pool
-  NON
-}
-export class FillBetSlip {
-  public str:String = "";
-  public row = 0;
-  public column = 0;
-  public f_end:any;
-  public f_begin = 0;
 
-  public a_most = 0;
-  public a_least = 0;
+/// <summary>
+/// Provides similar functionality to a StringBuilder, but for bytes
+/// And also provide extraction functions for reply message
+/// </summary>
+///
+/// <remarks>
+/// To fill the builder, construct a new, empty builder, and call the
+/// appropriate Append method overloads.
+/// To read data from the builder, either use Rewind on an existing
+/// builder, or construct a new builder by passing it the byte array
+/// from a previous builder - which you can get with the ToArray
+/// method.
+/// </remarks>
+export class ByteArrayBuilder {
+    /// <summary>
+    /// Holds the actual bytes.
+    /// </summary>
+    private store = new BufferBuilder(0x1000);
+    private store_Position = 0;
+    // region Constants
+    /// <summary>
+    /// True in a byte form of the Line
+    /// </summary>
+    readonly streamTrue = 1;
+    /// <summary>
+    /// False in the byte form of a line
+    /// </summary>
+    readonly streamFalse = 0;
 
-  public other:number[];
-  public type = FillType.TRIM;
-  public constructor(row=0,column=0,type=0,f_begin=0,f_end:any=0,a_least=0,a_most=0,other:number[]=[]){
-    this.row=row;
-    this.column=column;
-    this.type=type;
-    this.f_begin=f_begin;
-    this.f_end=f_end;
-  
-    this.a_least=a_least;
-    this.a_most=a_most;
-    this.other=other;
-  }
-  
-  public randomfillseln(length){
-    let t=randomBytes(1);
-    if(t[0]%length!==0){
-      return this.randomfill(this.row,this.column,this.f_begin,this.f_end,this.a_least,this.f_end);            
-    }else{
-      this.randomfill();
-      this.str = this.str.substr(0,this.str.length-1)+"1";
-    }
-  }
-  public randomfill(row=this.row,column=this.column,f_begin:any=this.f_begin,f_end:any=this.f_end,atleast=this.a_least,atmost=this.a_most) {
-    let res = "";
-    let j = 0;
-    let jobject = -1;
-    for(let i=0;i<row*column;i++){
-        let t=randomBytes(1);
-        if(i>=f_begin){
-          if((typeof f_end === 'number' && i<f_end)){
-            if(j < atmost && (t[0]<(128*(atleast+atmost))/(f_end-f_begin) || f_end-i===atleast-j) ){
-              res += '1';
-              j++;
-            }else{
-              res += '0';
-            }
-          }else if(typeof f_end === 'object' && f_end.indexOf(i)>-1){
-            if(j < atmost && (t[0]<(128*(atleast+atmost))/f_end.length || (f_end[f_end.length-1]===i&&atleast>j)) ){
-            //  console.log("f_end.length-i="+(f_end.length-i));
-              res += '1';
-              j++;
-              jobject=i;
-            }else{
-            //  console.log("f_end.length-i="+(f_end.length-i)+",atleast-j="+(atleast-j));
-              res += '0';
-            }
-          } else {
-              res += '0';
-          }
-        }else{
-          res += '0';
-        }
-    }
-    this.str += res;
+    readonly BIT6 = 0x40;
+    // endregion
 
-    return jobject>=0?jobject:j; // f_end is object return index, f_end is arr return value=1's count
-  }
-}
-export class FillBetSlipUtil {
-  public xoffset = 0;
-  public yoffset = 0;
-  public xmax = 0;
-  private ymax = 22;
-  public result:Buffer;
-  private xarroffset1 = [];
-  private yarroffset1 = [];
-  private xarroffset2 = [];
-  private yarroffset2 = [];
-  
-  private yconst = 0;
-  private slipId =0;
-  public constructor(xmax,ymax=22){
-    this.xmax=xmax;
-    let res="";
-    for(let x=0; x<xmax; x++){
-      for(let y=0; y<ymax; y++){
-        res+= '0';
-      }
-    }
-    this.result = Buffer.from(res);
-  }
-
-  public pushlist(xa:number[],ya:number[]){
-    let r="";
-    for(let i=0;i<xa.length;i++){
-      r="";
-      for(let x=0; x<xa[i]; x++){
-          for(let y=0; y<ya[i]; y++){
-              r+= String.fromCharCode(48+i%10);
-          }
-      }
-      this.push(Buffer.from(r),ya[i],xa[i]);
-    }
-  }
-  public race_formula_bank_seln(xa:number[],ya:number[]){
-    
-  }
-
-  public push(instr:Buffer, iny:number, inx:number){
-    if(this.xoffset * this.yoffset >= this.xmax * this.ymax){
-      return;
-    } else if(this.xoffset + inx > this.xmax){
-      return;
-    } else if(this.yoffset + iny > this.ymax){
-      return;
-    }
-    let i = 0;
-    for(let x=this.xoffset; x<inx+this.xoffset; x++){
-      for(let y=this.yoffset; y<iny+this.yoffset; y++){
-        this.result[x*this.ymax+y] = instr[i++];
-      }
-    }
-    this.xoffset+=inx;
-    this.yoffset+=iny;
-    if(this.xoffset===this.xmax && this.yoffset<this.ymax){// down
-      this.yconst += iny;
-      let sh = 0;
-      let lasty = 0;
-      let lastx = 0;
-      let lastytmp = 0;
-      while(lasty<iny){
-        sh = this.yarroffset1.shift();
-        sh = sh?sh:0;
-        lasty += sh;
-        if(sh === 0){
-          break;
-        }else{
-          lastytmp = lasty-iny;
-        }
-        lastx = this.xarroffset1.shift();
-      }
-      lastx = lastx?lastx:0;
-      if(lastytmp>0){
-        this.yarroffset1.unshift(lastytmp);
-        this.xarroffset1.unshift(lastx);
-      }
-      this.xoffset = this.xarroffset1[0]?this.xarroffset1[0]:0;
-    } else if(this.yoffset===this.ymax && this.xoffset<this.xmax) { // right
-      this.xarroffset2.push(this.xoffset);
-      this.yarroffset2.push(iny);
-      let sh = this.xarroffset2[0];
-      this.xoffset = sh?sh:0;
-      this.yoffset = this.yconst;
-      this.xarroffset1 = this.xarroffset2;
-      this.yarroffset1 = this.yarroffset2;
-      this.xarroffset2 = [];
-      this.yarroffset2 = [];
-    } else if(this.yoffset<this.ymax && this.xoffset<this.xmax) { // down
-      let lasty = 0;
-      let lastx = 0;
-      let lastytmp = 0;
-      let sh = 0;
-      while(lasty<iny){
-        sh = this.yarroffset1.shift();
-        sh = sh?sh:0;
-        lasty += sh;
-        if(sh === 0){
-          break;
-        }else{
-          lastytmp = lasty-iny;
-        }
-        lastx = this.xarroffset1.shift();
-      }
-      lastx = lastx?lastx:0;
-      if(lastytmp>0){
-        this.yarroffset1.unshift(lastytmp);
-        this.xarroffset1.unshift(lastx);
-      }
-      this.xoffset = this.xarroffset1[0]?this.xarroffset1[0]:0;
-      this.xarroffset2.push(lastx+inx);
-      this.yarroffset2.push(iny);
-    } 
-  }
-
-  public createSlipdata(slipId,contentAndRule:FillBetSlip[],specRule){
-    this.slipId=slipId;
-
-    let r='';
-    let race:FillBetSlip;
-    let formular:FillBetSlip;
-    let poolArr:FillBetSlip[]=[];
-    let bankArr:FillBetSlip[]=[];
-    let selnArr:FillBetSlip[]=[];
-    for(let i=0;i<contentAndRule.length;i++){
-      switch (contentAndRule[i].type) {
-        case FillType.POOL:
-        poolArr.push(contentAndRule[i]);
-        break;
-        case FillType.FORMULAR:
-        formular=contentAndRule[i];
-        break;
-        case FillType.BANK:
-        bankArr.push(contentAndRule[i]);
-        break;
-        case FillType.RACE:
-        race=contentAndRule[i];
-        break;
-        case FillType.SELN:
-        selnArr.push(contentAndRule[i]);
-        break;
-        case FillType.VALUE:
-        contentAndRule[i] = this.fillValue(this.slipId,contentAndRule[i]);
-        // contentAndRule[i].randomfill(contentAndRule[i].row,contentAndRule[i].column,0,
-        //   contentAndRule[i].row * contentAndRule[i].column);
-        // contentAndRule[i].str = contentAndRule[i].str.slice(0,6)+'0'+contentAndRule[i].str.slice(7,contentAndRule[i].str.length-1);
-        break;
-        default:
-        contentAndRule[i].randomfill();
-      }
-    }
-    let racenum = 0;
-    let formulararr:number[];
-    //order RuleType.RACE_EQ_FORMULAR_LEG > RuleType.POOL_WP_QQP > RuleType.WIN_PLA_WQ_NOBANK
-    for(let i=0;i<specRule.length;i++){
-      switch(specRule[i]){
-        case RuleType.RACE_EQ_FORMULAR_LEG:
-          racenum = race.randomfill();// race.row,race.column,0,15,4,6
-          switch(slipId){
-            case 181:
-            case 186:
-            formulararr = this.getformlar(racenum,2,4-0,2);
-            break;
-            case 185:
-            formulararr = this.getformlar(racenum,9,4-0,4,2);
-            break;
-          }
-          formular.randomfill(formular.row,formular.column,0,formulararr);
-          break;
-        case RuleType.POOL_WP_QQP:
-        case RuleType.POOL_WP_QQP_CWA:
-          for(let j=0;j<poolArr.length;j++){
-            //let poolnum = poolArr[j].randomfill(poolArr[j].row,poolArr[j].column,0,4,2);
-            if(j<racenum){
-              poolArr[j].str=this.createValidate_pool(slipId,poolArr[j]);
-            }else{
-              poolArr[j].randomfill();
-            }
-          }
-        break;
-        case RuleType.WIN_PLA_WQ_NOBANK:
-          for(let j=0;j<poolArr.length;j++){
-            if(j<racenum){
-              selnArr[j].randomfillseln(racenum+1);
-              //selnArr[j].randomfill(selnArr[j].row,selnArr[j].column,selnArr[j].f_begin,selnArr[j].f_end,selnArr[j].a_least,selnArr[j].f_end);
-              if(poolArr[j].str=='0001'||poolArr[j].str=='0010'||poolArr[j].str=='0011'){
-                bankArr[j].randomfill(bankArr[j].row,bankArr[j].column,bankArr[j].f_begin,bankArr[j].f_end,bankArr[j].a_least,bankArr[j].f_end);
-              }else{
-                bankArr[j].randomfill();
-              }
-            }else{
-              selnArr[j].randomfill();
-              bankArr[j].randomfill();
-            }
-          }
-        break;
-        case RuleType.WIN_PLA_WQ_NOBANK_CWA:
-          for(let j=0;j<poolArr.length;j++){
-            if(j<racenum){
-              if(poolArr[j].str=='1000000'){
-                //selnArr[j*2+1].randomfill();
-                //selnArr[j*2].randomfill(selnArr[j*2].row,selnArr[j*2].column,selnArr[j*2].f_begin,selnArr[j*2].f_end,selnArr[j*2].a_least,selnArr[j*2].a_least);
-                selnArr[j].randomfill(1,selnArr[j].column,0,selnArr[j].f_begin,1,1);
-                selnArr[j].randomfill(1,selnArr[j].column,0,0,0,0);
-                selnArr[j].randomfill(selnArr[j].row-2,selnArr[j].column,0,0,0,0);
-                bankArr[j].randomfill();
-              }else if(poolArr[j].str=='0000010'||poolArr[j].str=='0000100'||poolArr[j].str=='0000110'){
-                //selnArr[j*2+1].randomfillseln(racenum+1);
-                //selnArr[j*2].randomfill();
-                selnArr[j].randomfill(1,selnArr[j].column,0,0,0,0);
-                selnArr[j].randomfill(1,selnArr[j].column,0,0,0,0);
-                let tmp1= new FillBetSlip(selnArr[j].row-2,selnArr[j].column,0,0,selnArr[j].f_end,1,0);
-                tmp1.randomfillseln(racenum+1);
-                selnArr[j].str+=tmp1.str.toString();
-                bankArr[j].randomfill(bankArr[j].row,bankArr[j].column,bankArr[j].f_begin,bankArr[j].f_end,bankArr[j].a_least,bankArr[j].f_end-1);
-              }else{
-                //selnArr[j*2+1].randomfillseln(racenum+1);
-                //selnArr[j*2].randomfill();
-                selnArr[j].randomfill(1,selnArr[j].column,0,0,0,0);
-                selnArr[j].randomfill(1,selnArr[j].column,0,0,0,0);
-                let tmp1= new FillBetSlip(selnArr[j].row-2,selnArr[j].column,0,0,selnArr[j].f_end,1,0);
-                tmp1.randomfillseln(racenum+1);
-                selnArr[j].str+=tmp1.str.toString();
-                bankArr[j].randomfill();
-              }
-            }else{
-              // selnArr[j*2+1].randomfill();
-              // selnArr[j*2].randomfill();
-              selnArr[j].randomfill();
-              bankArr[j].randomfill();
-            }
-          }
-        break;  
-        case RuleType.ONLY_ONE_RACE_FORMULA:
-          race.randomfill();// race.row,race.column,0,15,4,6
-          racenum = formular.f_end.indexOf(formular.randomfill());
-          break;  
-        case RuleType.ONLY_ONE_RACE_FORMULA_SELN:
-          let resarr = this.randomfillselnCC(bankArr,racenum+1);
-          for(let i=0;i<resarr[0].length;i++){
-            if(resarr[0][i][0]){
-              bankArr[i].randomfillseln(bankArr.length+1);
+    public static StringToBytes(str: string) {
+        const bytes = new Array();
+        let len: number, c: number;
+        len = str.length;
+        for (let i = 0; i < len; i++) {
+            c = str.charCodeAt(i);
+            if (c >= 0x010000 && c <= 0x10ffff) {
+                bytes.push(((c >> 18) & 0x07) | 0xf0);
+                bytes.push(((c >> 12) & 0x3f) | 0x80);
+                bytes.push(((c >> 6) & 0x3f) | 0x80);
+                bytes.push((c & 0x3f) | 0x80);
+            } else if (c >= 0x000800 && c <= 0x00ffff) {
+                bytes.push(((c >> 12) & 0x0f) | 0xe0);
+                bytes.push(((c >> 6) & 0x3f) | 0x80);
+                bytes.push((c & 0x3f) | 0x80);
+            } else if (c >= 0x000080 && c <= 0x0007ff) {
+                bytes.push(((c >> 6) & 0x1f) | 0xc0);
+                bytes.push((c & 0x3f) | 0x80);
             } else {
-              bankArr[i].a_most = resarr[0][i][1];
-              bankArr[i].randomfill();
+                bytes.push(c & 0xff);
             }
-          }
-          if(resarr[1][0][0]){
-            selnArr[0].randomfillseln(selnArr.length+1);
-          } else {
-            selnArr[0].a_most = resarr[1][0][1];
-            selnArr[0].randomfill();
-          }
-          break; 
-        case RuleType.FF_TRI_DT_TT:
-          let index = poolArr[0].randomfill();
-          bankArr[0].randomfill();
-          selnArr[0].randomfillseln(3);
-          if(poolArr[0].f_end[index]===TRIType.TRI) {
-            racenum = race.randomfill();  
-            if(racenum === 1){//TRI
-              formular.randomfill(formular.row,formular.column,0,0,0);
-              bankArr[1].randomfill(bankArr[1].row,bankArr[1].column,0,0);
-              selnArr[1].randomfill(selnArr[1].row,selnArr[1].column,0,0);
-              bankArr[2].randomfill(bankArr[2].row,bankArr[2].column,0,0);
-              selnArr[2].randomfill(selnArr[2].row,selnArr[2].column,0,0);
-            }else{//ATRI
-              formulararr = this.getformlar(racenum,2,4-0,2);
-              formular.randomfill(formular.row,formular.column,0,formulararr,1);
-              bankArr[1].randomfill();
-              selnArr[1].randomfillseln(racenum+1);
-              if(racenum === 2){
-                bankArr[2].randomfill(bankArr[2].row,bankArr[2].column,0,0);
-                selnArr[2].randomfill(selnArr[2].row,selnArr[2].column,0,0);
-              } else if(racenum === 3){
-                bankArr[2].randomfill();
-                selnArr[2].randomfillseln(racenum+1);
-              }
-            }
-          }else{
-            formular.randomfill(formular.row,formular.column,0,0,0);
-            if(poolArr[0].f_end[index]===TRIType.FF){
-              race.randomfill(race.row,race.column,race.f_begin,race.f_end,1,1);
-              bankArr[1].randomfill(bankArr[1].row,bankArr[1].column,0,0);
-              selnArr[1].randomfill(selnArr[1].row,selnArr[1].column,0,0);
-              bankArr[2].randomfill(bankArr[2].row,bankArr[2].column,0,0);
-              selnArr[2].randomfill(selnArr[2].row,selnArr[2].column,0,0);
-            }else {
-              race.randomfill(race.row,race.column,race.f_begin,race.f_end,0,1);
-              bankArr[1].randomfill();
-              selnArr[1].randomfillseln(3+1);
-              if(poolArr[0].f_end[index]===TRIType.DT){
-                bankArr[2].randomfill(bankArr[2].row,bankArr[2].column,0,0);
-                selnArr[2].randomfill(selnArr[2].row,selnArr[2].column,0,0);
-              }else{
-                bankArr[2].randomfill();
-                selnArr[2].randomfillseln(3+1);
-              }
-            }
-            
-          }
-          //racenum = formular.f_end.indexOf(formular.randomfill());
-
-          //formulararr = this.getformlar(racenum,2,4-0,2);
-          break;
-        case RuleType.POOL_EQ_LEG:
-          race.randomfill();// race.row,race.column,0,15,4,6
-          let DBL_TBL_6UP_Array = [2,3,6];
-          racenum = poolArr[0].randomfill();
-          for(let i = 0;i < selnArr.length;i++){
-            let itmp = (i%2===0)?Math.floor(i/2):(3+Math.floor(i/2));
-            if(itmp < DBL_TBL_6UP_Array[racenum]){
-              selnArr[i].randomfillseln(racenum+1);
+        }
+        return bytes;
+    }
+    //
+    public static BytesToString(arr) {
+        if (typeof arr === 'string') {
+            return arr;
+        }
+        let str = '';
+        const _arr = arr;
+        for (let i = 0; i < _arr.length; i++) {
+            const one = _arr[i].toString(2),
+                v = one.match(/^1+?(?=0)/);
+            if (v && one.length === 8) {
+                const bytesLength = v[0].length;
+                let store = _arr[i].toString(2).slice(7 - bytesLength);
+                for (let st = 1; st < bytesLength; st++) {
+                    store += _arr[st + i].toString(2).slice(2);
+                }
+                str += String.fromCharCode(parseInt(store, 2));
+                i += bytesLength - 1;
             } else {
-              selnArr[i].randomfill();
+                str += String.fromCharCode(_arr[i]);
             }
-          }
-          break; 
-      }
-    }
-    for(let i=0;i<contentAndRule.length;i++){
-      this.push(Buffer.from(contentAndRule[i].str),contentAndRule[i].column,contentAndRule[i].row);
-
-      // r="";
-      // for(let x=0; x<contentAndRule[i][0]; x++){
-      //     for(let y=0; y<contentAndRule[i][1]; y++){
-      //         r+= String.fromCharCode(48+i%10);
-      //     }
-      // }
-      //this.push(Buffer.from(r),ya[i],xa[i]);
-    }
-
-    
-
-    // let leg1st = new FillBetSlip();//1ST LEG
-    // leg1st.randomfill(1,4);
-    // this.push(Buffer.from(leg1st.str),1,4);
-    
-    // // let leg1st_pool_box = new FillBetSlip();//pool_box
-    // // let poolbox1 = leg1st_pool_box.randomfill(1,4,4,1);
-    // // this.push(Buffer.from(leg1st_pool_box.str),1,4);
-    // this.push(Buffer.from("1000"),1,4);
-
-    // let leg1st_bank_box = new FillBetSlip();//bank1
-    // leg1st_bank_box.randomfill(3,4,12,1);
-    // this.push(Buffer.from(leg1st_bank_box.str),3,4);
-
-    // let leg1st_seln_box = new FillBetSlip();//value1
-    // leg1st_seln_box.randomfill(10,4,34,1); //
-    // this.push(Buffer.from(leg1st_seln_box.str),10,4);
-
-
-    // let leg2nd = new FillBetSlip();//2nd LEG
-    // leg2nd.randomfill(2,4);
-    // this.push(Buffer.from(leg2nd.str),2,4);
-
-    // let leg2ndt_pool_box = new FillBetSlip();//pool_box
-    // leg2ndt_pool_box.randomfill(1,4,4,1);
-    // this.push(Buffer.from(leg2ndt_pool_box.str),1,4);
-    
-    // let leg2nd_bank_box = new FillBetSlip();//bank2
-    // leg2nd_bank_box.randomfill(3,4,12,1);
-    // this.push(Buffer.from(leg2nd_bank_box.str),3,4);
-
-    // let leg2nd_seln_box = new FillBetSlip();//value2
-    // leg2nd_seln_box.randomfill(10,4,34,1);
-    // this.push(Buffer.from(leg2nd_seln_box.str),10,4);
-
-    // let leg3rd = new FillBetSlip();//3RD LEG
-    // leg3rd.randomfill(1,16,15,6);
-    // this.push(Buffer.from(leg3rd.str),1,16);
-
-    // let leg3rd_trim = new FillBetSlip();//3RD LEG
-    // leg3rd_trim.randomfill(1,4);
-    // this.push(Buffer.from(leg3rd_trim.str),1,4);
-
-    // let leg3rd_pool_box = new FillBetSlip();//pool_box
-    // leg3rd_pool_box.randomfill(1,4,4,1);
-    // this.push(Buffer.from(leg3rd_pool_box.str),1,4);
-    
-    // let leg3rd_bank_box = new FillBetSlip();//bank3
-    // leg3rd_bank_box.randomfill(3,4,12,1);
-    // this.push(Buffer.from(leg3rd_bank_box.str),3,4);
-
-    // let leg3rd_seln_box = new FillBetSlip();//value3
-    // leg3rd_seln_box.randomfill(10,4,34,1);
-    // this.push(Buffer.from(leg3rd_seln_box.str),10,4);
-
-    
-    // let leg4th = new FillBetSlip();//4TH LEG
-    // leg4th.randomfill(1,4);
-    // this.push(Buffer.from(leg4th.str),1,4);
-
-    // let leg4th_trim = new FillBetSlip();//4TH LEG
-    // leg4th_trim.randomfill(1,4);
-    // this.push(Buffer.from(leg4th_trim.str),1,4);
-
-    // let leg4th_pool_box = new FillBetSlip();//pool_box
-    // leg4th_pool_box.randomfill(1,4,4,1);
-    // this.push(Buffer.from(leg4th_pool_box.str),1,4);
-    
-    // let leg4th_bank_box = new FillBetSlip();//bank4
-    // leg4th_bank_box.randomfill(3,4,12,1);
-    // this.push(Buffer.from(leg4th_bank_box.str),3,4);
-
-    // let leg4th_seln_box = new FillBetSlip();//value4
-    // leg4th_seln_box.randomfill(10,4,34,1);
-    // this.push(Buffer.from(leg4th_seln_box.str),10,4);
-
-    // let leg5th_trim = new FillBetSlip();//5TH LEG
-    // leg5th_trim.randomfill(1,4);
-    // this.push(Buffer.from(leg5th_trim.str),1,4);
-
-    // let leg5th_pool_box = new FillBetSlip();//pool_box
-    // leg5th_pool_box.randomfill(1,4,4,1);
-    // this.push(Buffer.from(leg5th_pool_box.str),1,4);
-    
-    // let leg5th_bank_box = new FillBetSlip();//bank5
-    // leg5th_bank_box.randomfill(3,4,12,1);
-    // this.push(Buffer.from(leg5th_bank_box.str),3,4);
-
-    // let leg5th_seln_box = new FillBetSlip();//value4
-    // leg5th_seln_box.randomfill(10,4,34,1);
-    // this.push(Buffer.from(leg5th_seln_box.str),10,4);
-
-    // let leg6th_trim = new FillBetSlip();//6TH LEG
-    // leg6th_trim.randomfill(1,4);
-    // this.push(Buffer.from(leg6th_trim.str),1,4);
-
-    // let leg6th_pool_box = new FillBetSlip();//pool_box
-    // leg6th_pool_box.randomfill(1,4,4,1);
-    // this.push(Buffer.from(leg6th_pool_box.str),1,4);
-    
-    // let leg6th_bank_box = new FillBetSlip();//bank6
-    // leg6th_bank_box.randomfill(3,4,12,1);
-    // this.push(Buffer.from(leg6th_bank_box.str),3,4);
-
-    // let leg6th_seln_box = new FillBetSlip();//value6
-    // leg6th_seln_box.randomfill(10,4,34,1);
-    // this.push(Buffer.from(leg6th_seln_box.str),10,4);
-
-    // let formula_box = new FillBetSlip();//formula_box
-    // formula_box.randomfill(8,4);
-    // this.push(Buffer.from(formula_box.str),8,4);
-    // this.push(Buffer.from("1000"),1,4);
-
-    // this.push(Buffer.from("1000"),1,4);
-    // let value_box = new FillBetSlip();//value_box
-    // value_box.randomfill(5,4,20,1);
-    // this.push(Buffer.from(value_box.str),5,4);
-  }
- 
-  private getformlar1(racenum, slipid):number[]{
-    let slip;
-    switch (slipid){
-      case 185:
-      let formular=[[1,2,10,11,18,19,27,28],
-                    [3,4,5,12,13,20,21,22,29,30,31],
-                    [6,7,8,14,15,16,17,23,24,25,26,32,33,34,35]];
-      slip = formular[racenum-4];
-      break;
-    }
-    
-
-    return slip;
-  }
- 
-  private getformlar(racenum1,row,column,begin_formula=0,offset_begin_x_cell=0):number[]{
-    // offset_begin_x_cell <= column   column=y-offset_end_y_line
-    if(racenum1<2||racenum1>8) return [];
-    let racenum = racenum1 - 2;
-    let num1 = racenum<4?1<racenum?racenum-1:0:0;
-    let num2 = racenum===4?racenum:0;
-    let num3 = racenum>4?racenum>5?-7:-6:0;
-    let num = (racenum?3:2)+2*racenum+(num1?num1:num2?num2:num3);
-    let slip = [];
-    let forarr = [0,0,2,5,8,11,15,7,8];
-    let x_offset = offset_begin_x_cell;
-    for(let i=begin_formula;i<forarr.length && i<racenum1;i++){
-      x_offset+=forarr[i];
-    }
-    let firstindex=Math.floor(x_offset/column)+(x_offset%column)*row;
-    for(let i = 0;i < num;i++){
-      slip.push(firstindex);
-      firstindex += row;
-      if(firstindex>=row*column){
-        firstindex = firstindex%row+1;
-      }
-    }
-    
-    return slip;
-  }
-
-  private createValidate_pool(slipId,pool){
-    let index;
-    switch (slipId){
-      case 181:
-      case 185:
-        pool.randomfill(1,pool.f_end,0,pool.f_end,1,2);
-        while(pool.str == '1010' ||pool.str == '1001' || pool.str == '0110' || pool.str == '0101'){
-          pool.str = '';
-          pool.randomfill(1,pool.f_end,0,pool.f_end,1,2);
-          //pool.randomfill(pool.row,pool.column,0,pool.row*pool.column,1,2);
         }
-        for(let i=0;i<pool.row-pool.f_end;i++){
-          pool.str += '0';
-        }
-        break;
-      case 186:
-        index = pool.randomfill(1,pool.row,0,pool.f_end,pool.a_least,pool.a_least);
-        if(index>1&&index<6){
-          let t=randomBytes(1);
-          if(t[0]%2!==0){
-            if(index>3){
-              pool.str = "0000110";
-            }else{
-              pool.str = "0011000";
+        return str;
+    }
+
+    private store_AppendBuffer(buf: Buffer) {
+        // 写函数不提供插入操作
+        this.store.appendBuffer(buf);
+        this.store_Position = this.store.length;
+    }
+
+    private store_AppendString(str: string) {
+        // 写函数不提供插入操作
+        this.store.appendString(str, 'utf8');
+        this.store_Position = this.store.length;
+    }
+    private store_AppendByte(byte: number) {
+        this.store.appendUInt8(byte);
+        this.store_Position = this.store.length;
+    }
+    private store_ReadByte(): number {
+        const buf = Buffer.alloc(1);
+        this.store.copy(buf, 0, this.store_Position, this.store_Position + 1);
+        this.store_Position += 1;
+        return buf[0];
+    }
+    private store_ReadBytes(len: number): Buffer {
+        const buf = Buffer.alloc(len);
+        this.store.copy(buf, 0, this.store_Position, this.store_Position + len);
+        this.store_Position += len;
+        return buf;
+    }
+    private store_Seek(offset: number): number {
+        this.store_Position = offset;
+        return this.store_Position;
+    }
+
+    // region Constructors
+    /// <summary>
+    /// Create a new, empty builder ready to be filled.
+    /// </summary>
+    constructor() {}
+
+    // endregion
+
+    // region Properties
+    /// <summary>
+    /// Bytes in the store.
+    /// </summary>
+    public get Length() {
+        return this.store.length;
+    }
+    //     /// <summary>
+    //     /// The current position of store stream
+    //     /// </summary>
+    public get Position() {
+        return this.store_Position;
+    }
+
+    //     /// <summary>
+    //     /// End of stream
+    //     /// </summary>
+    //     /// <returns></returns>
+    public get EOS() {
+        return this.store.length === this.store_Position;
+    }
+
+    // // endregion
+
+    // // region Public Methods
+
+    // // region 1: Append
+
+    //     /// <summary>
+    //     /// Set new customer flag
+    //     /// </summary>
+    //     /// <param name="b"></param>
+    public AppendNewCust(b: boolean) {
+        this.Append(b);
+    }
+
+    //     /// <summary>
+    //     /// Set message code
+    //     /// </summary>
+    //     /// <param name="msgCode">message code</param>
+    public AppendMsgCode(msgCode: number) {
+        this.Append(msgCode);
+    }
+
+    //     /// <summary>
+    //     /// Add separator sign to byte array, default with character '/'
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutAsciiChar('/')
+    //     ///
+    //     /// <param name="c">sepatator char</param>
+    public AppendSeparator(c = Constansts.CHAR_SLASH) {
+        this.Append(c);
+    }
+
+    //     /// <summary>
+    //     /// Formatting an fixed length string into byte array, pad right default
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutFixStr
+    //     /// 2:CScmpOutVarStr
+    //     /// 3:CScmpOutNF(Ascii)
+    //     /// 4:CScmpOutN9(Ascii)
+    //     ///
+    //     /// <param name="s">To be appended string data</param>
+    //     /// <param name="len">Fix length,when the length of s less len, should pad zero</param>
+    //     /// <param name="option">After pad right, Before pad left</param>
+    // public AppendFixStrlen(s: string, len: number, padChar = ' ', option = PadOption.After) {
+    //     if (s.length < len) {
+    //         if (option === PadOption.Before) {
+    //             while (s.length < len) {
+    //                 s = padChar + s;
+    //             }
+    //         } else {
+    //             while (s.length < len) {
+    //                 s = s + padChar;
+    //             }
+    //         }
+    //     }
+    //     this.Append(s);
+    // }
+
+    public AppendOutVarStr(s: string) {
+        this.Append(s);
+    }
+    //     /// <summary>
+    //     /// Formatting an fixed length string into byte array, pad right default
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutFixStr
+    //     /// 2:CScmpOutVarStr
+    //     /// 3:CScmpOutNF(Ascii)
+    //     /// 4:CScmpOutN9(Ascii)
+    //     ///
+    //     /// <param name="s">To be appended string data</param>
+    //     /// <param name="option">After pad right, Before pad left</param>
+    AppendFixStr(
+        s: string | Buffer,
+        len: number,
+        padChar?: string,
+        option?: PadOption
+    );
+    AppendFixStr(s: string, padChar?: string, option?: PadOption);
+    // AppendFixStr(s: , len: number, padChar?: string, option?: PadOption);
+    public AppendFixStr(b?, b1?, b2?, b3?) {
+        const btypestr = typeof b;
+        const b1typestr = typeof b1;
+        const b2typestr = typeof b2;
+        if (btypestr === 'string' && b1typestr === 'number') {
+            let s: string = b;
+            const len: number = b1;
+            const padChar: string = b2 || ' ';
+            const option: PadOption =
+                typeof b3 === 'undefined' || b3 === null ? PadOption.After : b3;
+
+            if (s.length < len) {
+                if (option === PadOption.Before) {
+                    while (s.length < len) {
+                        s = padChar + s;
+                    }
+                } else {
+                    while (s.length < len) {
+                        s = s + padChar;
+                    }
+                }
+            } else {
+                s = s.substr(0, len);
             }
-          } 
-        }
-        break;
-    }
-    return pool.str;
-  }
+            this.Append(s);
+        } else if (btypestr === 'string' && b1typestr === 'string') {
+            const s: string = b;
+            const padChar: string = b1 || ' ';
+            const option: PadOption =
+                typeof b2 === 'undefined' || b2 === null ? PadOption.After : b2;
+            const len = s.length;
+            this.AppendFixStr(s, len, padChar, option);
+        } else if (btypestr === 'object' && b1typestr === 'number') {
+            const s: Buffer = b;
+            const len: number = b1;
+            const padChar: string = b2 || ' ';
+            const option: PadOption =
+                typeof b3 === 'undefined' || b3 === null ? PadOption.After : b3;
 
-  private fillValue(slipId,content){
-    let t=randomBytes(1);
-    switch (slipId){
-      case 185:
-      case 181:
-      case 182:
-      case 186:
-        if(t[0]%2===0){
-          content.str='1';
-          content.randomfill(1,5,0,5,0,5);
-          content.str+='0';
-        }else{
-          content.str='0';
-          content.randomfill(1,5,0,5,0,5);
-          content.str+='1';
+            const fixStr = ByteArrayBuilder.BytesToString(s);
+            this.AppendFixStr(fixStr, len, padChar, option);
+        } else if (btypestr === 'string') {
+            const s: string = b;
+            const padChar: string = b1 || ' ';
+            const option: PadOption =
+                typeof b2 === 'undefined' || b2 === null ? PadOption.After : b2;
+            const len = s.length;
+            this.AppendFixStr(s, len, padChar, option);
         }
-        content.randomfill(1,5,0,5,0,5);
-        content.randomfill(2,6,0,10,0,10);
-        break;
-      case 183:
-        if(t[0]%2===0){
-          content.str='1';
-          content.randomfill(1,6,0,6,0,6);
-          content.str+='0';
-        }else{
-          content.str='0';
-          content.randomfill(1,6,0,6,0,6);
-          content.str+='1';
-        }
-        content.randomfill(1,6,0,5,0,5);
-        content.randomfill(1,7,0,6,0,6);
-        content.randomfill(1,7,0,6,0,6);
-        break;
-      default:
-        content.randomfill();
-        break;
     }
-    return content;
-  }
-  private randomfillselnCC(bankArr,CCID){//seln must 1,so do not pass to here
-    let res=[[],[]];
-    switch (CCID){
-      case CCType.S:
-        for(let i=0;i<bankArr.length;i++){
-          res[0].push([false,1]);//use f ,at_most
+    // public AppendFixStr(s: string, padChar = ' ', option = PadOption.After) {
+    //     const len = s.length;
+    //     this.AppendFixStrlen(s, len, padChar, option);
+    // }
+
+    //     /// <summary>
+    //     /// Formatting an fixed length into byte array, pad right default
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutFixStr
+    //     ///
+    //     /// <param name="s">To be appended byte array data</param>
+    //     /// <param name="len">Fix length,when the length of s less len, should pad zero</param>
+    //     /// <param name="option">After pad right, Before pad left</param>
+    // public AppendFixStrBuffer(s: Buffer, len: number, padChar = ' ', option = PadOption.After) {
+    //     const fixStr = this.BytesToString(s);
+    //     this.AppendFixStrlen(fixStr, len, padChar, option);
+    // }
+
+    //     /// <summary>
+    //     /// Formatting an ascii data into byte array
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutN9(Ascii)
+    //     ///
+    //     /// <param name="b">To be appended byte data</param>
+    AppendAscii(b: number | string); // AppendAscii(byte b) AppendAscii(c: string)
+    public AppendAscii(b_c?) {
+        const btypestr = typeof b_c;
+
+        if (btypestr === 'number') {
+            this.Append(b_c);
+        } else if (btypestr === 'string') {
+            this.Append(b_c);
         }
-        res[1].push([false,0]);//use f ,at_most
-      break;
-      case CCType.M:
-        for(let i=0;i<bankArr.length;i++){
-          res[0].push([false,0]);//use f ,at_most
-        }
-        res[1].push([true,1]);
-      break;
-      case CCType.B:
-      case CCType.BM:
-        for(let i=0;i<bankArr.length-1;i++){
-          res[0].push([false,1]);//use f ,at_most
-        }
-        res[0].push([false,0]);// last bank no one
-        res[1].push([true,1]);
-      break;
-      case CCType.MB:
-        for(let i=0;i<bankArr.length;i++){
-          res[0].push([true,1]);//use f ,at_most
-        }
-        res[1].push([false,0]);
-      break;
     }
-    return res;
-  }
-  public static creatslipdata(slipid,training=false){
-    let a; 
-    let contentAndRule;
-    let specRule;
-    switch (slipid){
-      case 184:
-      a = new FillBetSlipUtil(19);
-      contentAndRule=[new FillBetSlip(19,8,FillType.TRIM),
-        new FillBetSlip(19,1,FillType.X1,17,19,1,1),
-        new FillBetSlip(8,2,FillType.FORMULAR,0,[0,6,12,1,7],1,1),// 7.unuse
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.BANK,0,34,1,0),
-        new FillBetSlip(11,2,FillType.RACE,0,[5,7,9,10,11,12,13,14,15,16,17,18,19,20,21],1,1),
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.BANK,0,34,1,0),
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.BANK,0,34,1,0),
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.SELN,0,34,1,0),
-        new FillBetSlip(3,1,FillType.TRIM,0,2,1,1),
-        new FillBetSlip(3,8,FillType.VALUE,0,23,1,23),
-        new FillBetSlip(3,2,FillType.TRIM),
-        ];
-      specRule=[RuleType.ONLY_ONE_RACE_FORMULA,RuleType.ONLY_ONE_RACE_FORMULA_SELN]; // if pool == 2 rule=1100 or 0011
-      
-      break;
-      case 187:
-      a = new FillBetSlipUtil(15);
-      contentAndRule=[new FillBetSlip(15,8,FillType.TRIM),
-        new FillBetSlip(7,1,FillType.TRIM),
-        new FillBetSlip(7,2,FillType.FORMULAR,0,[0,6,12,1,7],1,1),// 7.unuse
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.BANK,0,34,1,0),
-        new FillBetSlip(2,1,FillType.X1,0,2,1,1),
-        new FillBetSlip(2,2,FillType.TRIM),
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.BANK,0,34,1,0),
-        new FillBetSlip(6,3,FillType.RACE,0,[1,2,4,5,6,7,8,9,10,11,12,13,14,15,16],1,1),
-        new FillBetSlip(4,1,FillType.TRIM),
-        new FillBetSlip(4,10,FillType.SELN,0,34,1,0),
-        new FillBetSlip(3,1,FillType.TRIM,0,2,1,1),
-        new FillBetSlip(3,8,FillType.VALUE,0,23,1,23),
-        new FillBetSlip(3,2,FillType.TRIM),
-        ];
-      specRule=[RuleType.ONLY_ONE_RACE_FORMULA,RuleType.ONLY_ONE_RACE_FORMULA_SELN]; // if pool == 2 rule=1100 or 0011
-      
-      break;
-      case 185:
-        a = new FillBetSlipUtil(28);
-        contentAndRule=[
-            new FillBetSlip(28,6,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.X1,0,2,1,1),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.POOL,0,4,0,0),//7.WP or QQP ,[2,['1100','0011']]
-                new FillBetSlip(4,3,FillType.BANK,0,12,0,0),
-                new FillBetSlip(4,10,FillType.SELN,0,34,1,0,[39]),
-                new FillBetSlip(4,2,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.POOL,0,4,0,0),
-                new FillBetSlip(4,3,FillType.BANK,0,12,0,0),
-                new FillBetSlip(4,10,FillType.SELN,0,34,1,0,[39]),
-                new FillBetSlip(16,1,FillType.RACE,0,15,4,6),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.POOL,0,4,0,0),
-                new FillBetSlip(4,3,FillType.BANK,0,12,0,0),
-                new FillBetSlip(4,10,FillType.SELN,0,34,1,0,[39]),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.POOL,0,4,0,0),
-                new FillBetSlip(4,3,FillType.BANK,0,12,0,0),
-                new FillBetSlip(4,10,FillType.SELN,0,34,1,0,[39]),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.POOL,0,4,0,0),
-                new FillBetSlip(4,3,FillType.BANK,0,12,0,0),
-                new FillBetSlip(4,10,FillType.SELN,0,34,1,0,[39]),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,1,FillType.POOL,0,4,0,0),
-                new FillBetSlip(4,3,FillType.BANK,0,12,0,0),
-                new FillBetSlip(4,10,FillType.SELN,0,34,1,0,[39]),//7. full
-                new FillBetSlip(4,9,FillType.FORMULAR,0,36,1,1,[0,9]),// 7.unuse
-                new FillBetSlip(4,6,FillType.VALUE,0,24,1,1,[0,6]),// 7.value type
-                ];
-        specRule=[RuleType.RACE_EQ_FORMULAR_LEG,RuleType.POOL_WP_QQP,RuleType.WIN_PLA_WQ_NOBANK]; // if pool == 2 rule=1100 or 0011
-      break;
-      case 180:
-        a = new FillBetSlipUtil(12);
-        contentAndRule=[
-            new FillBetSlip(12,12,FillType.TRIM),
-            new FillBetSlip(6,1,FillType.TRIM,0,2,1,1),
-            new FillBetSlip(6,4,FillType.VALUE,0,23,1,23),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,4,FillType.BANK,0,14,1,0),
-            new FillBetSlip(3,5,FillType.FORMULAR,0,[0,1,2,3,4],1,1),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,4,FillType.BANK,0,14,1,0),
-            new FillBetSlip(3,5,FillType.RACE,0,15,1,1),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,4,FillType.SELN,0,14,1,0),
-                ];
-            specRule=[RuleType.ONLY_ONE_RACE_FORMULA,RuleType.ONLY_ONE_RACE_FORMULA_SELN]; // if pool == 2 rule=1100 or 0011
-        break;
-        case 181:
-        a = new FillBetSlipUtil(19);
-        contentAndRule=[
-            new FillBetSlip(19,7,FillType.TRIM),
-            new FillBetSlip(5,1,FillType.POOL,0,4,0,0),//7.WP or QQP ,[2,['1100','0011']]
-            new FillBetSlip(5,7,FillType.BANK,0,34,1,0),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,1,FillType.POOL,0,4,0,0),//7.WP or QQP ,[2,['1100','0011']]
-            new FillBetSlip(5,7,FillType.BANK,0,34,1,0),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,1,FillType.POOL,0,4,0,0),//7.WP or QQP ,[2,['1100','0011']]
-            new FillBetSlip(5,7,FillType.BANK,0,34,1,0),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(4,1,FillType.X1,2,4,1,1),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,4,FillType.RACE,0,15,2,3),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,2,FillType.FORMULAR,0,7,1,1),// 7.unuse
-            new FillBetSlip(4,6,FillType.VALUE,0,24,1,1,[0,6]),
-                ];
-        specRule=[RuleType.RACE_EQ_FORMULAR_LEG,RuleType.POOL_WP_QQP,RuleType.WIN_PLA_WQ_NOBANK]; // if pool == 2 rule=1100 or 0011
-      break;
-      case 182:
-        a = new FillBetSlipUtil(19);
-        contentAndRule=[
-            new FillBetSlip(19,7,FillType.TRIM),
-            new FillBetSlip(5,1,FillType.TRIM),
-            new FillBetSlip(5,7,FillType.BANK,0,34,1,34),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,1,FillType.POOL,0,[0,1,2,3],1,1),//FF TRI DT TT
-            new FillBetSlip(5,7,FillType.BANK,0,34,1,34),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,1,FillType.TRIM),
-            new FillBetSlip(5,7,FillType.BANK,0,34,1,34),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(4,1,FillType.X1,2,4,1,1),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,4,FillType.RACE,0,15,1,3),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,2,FillType.FORMULAR,0,7,0,1),// 7.unuse
-            new FillBetSlip(4,6,FillType.VALUE,0,24,1,1,[0,6]),
-                ];
-        specRule=[RuleType.FF_TRI_DT_TT]; // if pool == 2 rule=1100 or 0011
-      break;
-      case 183:
-        a = new FillBetSlipUtil(19);
-        contentAndRule=[
-            new FillBetSlip(19,7,FillType.TRIM),
-            new FillBetSlip(5,1,FillType.POOL,0,[0,1,2],1,1),//FF TRI DT TT
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,1,FillType.TRIM),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,1,FillType.TRIM),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(5,7,FillType.SELN,0,34,1,0),
-            new FillBetSlip(4,1,FillType.X1,2,4,1,1),
-            new FillBetSlip(4,1,FillType.TRIM),
-            new FillBetSlip(4,4,FillType.RACE,0,15,1,1),
-            new FillBetSlip(4,2,FillType.TRIM),
-           // new FillBetSlip(4,2,FillType.FORMULAR,0,7,0,1),// 7.unuse
-            new FillBetSlip(4,7,FillType.VALUE,0,25,1,1,[0,7]),
-                ];
-        specRule=[RuleType.POOL_EQ_LEG]; // if pool == 2 rule=1100 or 0011
-      break;
-      case 186:
-        a = new FillBetSlipUtil(25);
-        contentAndRule=[
-            new FillBetSlip(25,7,FillType.TRIM),
-                new FillBetSlip(25,1,FillType.X1,23,25,1,1),
-                new FillBetSlip(25,1,FillType.TRIM),
-                new FillBetSlip(7,1,FillType.POOL,0,[0,2,3,4,5],1,0),//7.WP or QQP ,[2,['1100','0011']]
-                new FillBetSlip(7,5,FillType.BANK,0,34,0,0),
-                new FillBetSlip(7,7,FillType.SELN,4,34,1,0),
-                // new FillBetSlip(1,7,FillType.SELN,0,4,1,0),
-                new FillBetSlip(7,1,FillType.POOL,0,[0,2,3,4,5],1,0),//7.WP or QQP ,[2,['1100','0011']]
-                new FillBetSlip(7,5,FillType.BANK,0,34,0,0),
-                new FillBetSlip(7,7,FillType.SELN,4,34,1,0),
-                // new FillBetSlip(1,7,FillType.TRIM),
-                new FillBetSlip(7,1,FillType.POOL,0,[0,2,3,4,5],1,0),//7.WP or QQP ,[2,['1100','0011']]
-                new FillBetSlip(7,5,FillType.BANK,0,34,0,0),
-                new FillBetSlip(7,7,FillType.SELN,4,34,1,0),
-                // new FillBetSlip(5,7,FillType.SELN,0,34,1,0,[34]),
-                new FillBetSlip(4,4,FillType.RACE,0,15,1,3),
-                new FillBetSlip(4,1,FillType.TRIM),
-                new FillBetSlip(4,2,FillType.FORMULAR,0,7,1,1),// 7.unuse
-                // new FillBetSlip(1,7,FillType.SELN,0,4,1,0),
-                // new FillBetSlip(1,7,FillType.TRIM),
-                // new FillBetSlip(5,7,FillType.SELN,0,34,1,0,[34]),
-                // new FillBetSlip(1,7,FillType.SELN,0,4,1,0),
-                // new FillBetSlip(1,7,FillType.TRIM),
-                // new FillBetSlip(5,7,FillType.SELN,0,34,1,0,[34]),
-                new FillBetSlip(4,6,FillType.VALUE,0,24,1,1,[0,6]),// 7.value type
-                ];
-        specRule=[RuleType.RACE_EQ_FORMULAR_LEG,RuleType.POOL_WP_QQP_CWA,RuleType.WIN_PLA_WQ_NOBANK_CWA]; // if pool == 2 rule=1100 or 0011
-      break;
+
+    public ConvertInt2BCD(errnum: number) {
+        let res = Buffer.alloc(3);
+        res[2] = this.SHORT_TO_BCD(errnum, 12);
+        res[1] = this.SHORT_TO_BCD(errnum, 6);
+        res[0] = this.SHORT_TO_BCD(errnum, 0);
+        return res;
     }
-    if(training){
-      let xarr=[];
-      let yarr=[];
-      let resarr=[xarr,yarr];
-      for(let ii=0;ii<contentAndRule.length;ii++){
-        xarr.push(contentAndRule[ii].row);
-        yarr.push(contentAndRule[ii].column);
-      }
-      return resarr;
-    }else{
-      a.createSlipdata(slipid,contentAndRule,specRule);
-      return a;
+    private SHORT_TO_BCD(s: number, n: number) {
+        return ((s >> n) & 0x1f) | this.BIT6;
     }
-  }
+    //     /// <summary>
+    //     ///  Formatting a binary value into BIN6 byte array
+    //     ///  BCD digit(0-63) with bit 6 on
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutBin
+    //     ///
+    //     /// Example:
+    //     /// 0 will convert @
+    //     ///
+    //     /// <param name = "data" >To be appended byte data</ param >
+    public AppendBIN6(data: number) {
+        // AppendBIN6(byte data)
+        // if (data >= 0 && data <= 63) {
+        data = (data & 0x3f) | this.BIT6;
+        this.Append(data);
+        // } else {
+        //     // console.log(string.Format("BIN6 data out of range, data:{0}", data));
+        //     // throw new ComSvrException(ErrorMessage.BIN6DataOutOfRange);
+        //     console.log(`BIN6 data out of range, data:${data}`);
+        //     throw new ComSvrException(ErrorMessage.BIN6DataOutOfRange);
+        // }
+    }
+
+    //     /// <summary>
+    //     /// Format a datetime value into byte array
+    //     /// eg.
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpOutDDMMMYY
+    //     ///
+    //     /// Example:
+    //     /// Datetime:1981-12-25 10:15:18 will be converted to 25DEC81
+    //     ///
+    //     /// <param name="dt">To be appended datetime</param>
+    public AppendDDMMMYY(dt: Date) {
+        this.AppendDate(dt, DateFormatType.DDMMMYY);
+    }
+
+    //     /// <summary>
+    //     /// Format a time value into byte array
+    //     /// eg. Datetime:1981-12-25 10:15:18  return 1015
+    //     /// </summary>
+    //     /// <param name="dt">To be appended datetime</param>
+    public AppendHHMM(dt: Date) {
+        this.AppendDate(dt, DateFormatType.HHMM);
+    }
+
+    //     /// <summary>
+    //     /// Formatting money data into  byte array
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpOutMoney
+    //     ///
+    //     /// Example:
+    //     /// 1234 convert $AB.CD, -1234 convert $AB.CD-
+    //     ///
+    //     /// <param name="money"></param>
+    public AppendMoney(money: number) {
+        this.Append(Constansts.DOLLAR_SIGN);
+        const tmp = money > 0 ? money : money * -1;
+        const dollar = Math.floor(tmp / 100);
+        const cents = tmp % 100;
+        this.Append(dollar + '', true);
+        if (cents > 0) {
+            this.Append(Constansts.CHAR_DECIMAL_POINT);
+            this.Append(cents + '', true);
+        }
+        if (money < 0) {
+            this.Append(Constansts.CHAR_MINUS);
+        }
+    }
+
+    //     /// <summary>
+    //     /// Formatting a long data into byte array
+    //     /// BCD digit(0-9) with bit 6 on
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpOutN9(N9)
+    //     ///
+    //     /// Example:
+    //     /// 0 convert @, 1 convert A, 1234 convert ABCD
+    //     /// if val is 882 and len is 4, it will pad left zero, so 882 will be converted to @HHB
+    //     ///
+    //     /// <param name="val">To be appended data</param>
+    //     /// <param name="len">Fix length, when the length of parameter val less then len, should pad left zero</param>
+    AppendN9(val: number, len?: number); // AppendN9(long val, int len) AppendN9(long val)
+    AppendN9(b?, b1?) {
+        const btypestr = typeof b;
+        const b1typestr = typeof b1;
+        // const b2typestr = typeof b2;
+
+        if (btypestr === 'number' && b1typestr === 'number') {
+            const val: number = b;
+            const len: number = b1;
+            this.Append(val + '', b1, true);
+        } else if (btypestr === 'number') {
+            const val: number = b;
+
+            const str = val + '';
+            const len: number = str.length;
+            this.Append(str, len, true);
+        }
+    }
+
+    public AppendN9Ascii(str: string, len: number) {
+        if (len === 0) {
+            this.AppendOutVarStr(str);
+        } else {
+            this.AppendFixStr(str, len, '0', PadOption.Before);
+        }
+    }
+    //     /// <summary>
+    //     /// Formatting an n(F) data(0-F) into byte array
+    //     /// hex digit(0-F) with bit 6 on
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpOutNF(Hex)
+    //     ///
+    //     /// Example:
+    //     /// eg. 0 convert @, A convert J
+    //     ///
+    //     /// <param name="bs"></param>
+    public AppendNF(str: string) {
+        for (let i = 0; i < str.length; ++i) {
+            const data = str[i];
+            const datacode = str.charCodeAt(i);
+
+            if ((data >= '0' && data <= '9') || (data >= 'A' && data <= 'F')) {
+                let tmp = datacode & 0x0f;
+                if (datacode > 0x40) {
+                    tmp += 0x09;
+                }
+                tmp = tmp | this.BIT6;
+                this.Append(tmp);
+            } else {
+                logger.error(`NF data out of range, data:${str}`);
+                throw new ComSvrException(
+                    ERROR_MSG.RID_COMSERV_ERR_NFDATAOUTOFRANGE
+                );
+            }
+        }
+    }
+
+    //     /// <summary>
+    //     /// Formatting odds value into byte array
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpOutOdds
+    //     ///
+    //     /// Example:
+    //     ///  1234 will convert to >AB.CD
+    //     ///
+    //     /// <param name="odds"></param>
+    public AppendOdds(odds: number) {
+        const beforeDecimal = Math.floor(odds / 1000);
+        const afterDecimal = odds % 1000;
+        this.AppendAscii(Constansts.BANKER_INDICATOR);
+        this.AppendN9(beforeDecimal, 0);
+        if (afterDecimal > 0) {
+            this.Append(Constansts.CHAR_DECIMAL_POINT);
+            this.AppendN9(afterDecimal, Constansts.THREE_DECIMAL_PLACES_LENGTH);
+        }
+    }
+
+    //     /// <summary>
+    //     /// Adds a DateTime into byte array
+    //     /// </summary>
+    //     /// <param name="dt">Value to append to existing builder data</param>
+    public AppendDate(date: Date, dtFormat = DateFormatType.DDMMMYY) {
+        const m = new Array(
+            'Jan',
+            'Feb',
+            'Mar',
+            'Apr',
+            'May',
+            'Jun',
+            'Jul',
+            'Aug',
+            'Sep',
+            'Oct',
+            'Nov',
+            'Dec'
+        );
+        let dt_value = '';
+        const year = date.getFullYear() + '';
+        const month = ('00' + (date.getMonth() + 1)).slice(-2);
+        const monthE = m[date.getMonth()];
+        const day = ('00' + date.getDate()).slice(-2);
+        const hour = ('00' + date.getHours()).slice(-2);
+        const minute = ('00' + date.getMinutes()).slice(-2);
+
+        // Initializes a new en-us culture info
+        switch (dtFormat) {
+            case DateFormatType.YY:
+                dt_value = year.substr(2, 2);
+                break;
+            case DateFormatType.DDMMMYY:
+                dt_value = (day + monthE + year.substr(2, 2)).toUpperCase();
+                break;
+            case DateFormatType.DD_MMM_YY:
+                dt_value = (
+                    day +
+                    '_' +
+                    monthE +
+                    '_' +
+                    year.substr(2, 2)
+                ).toUpperCase();
+                break;
+            case DateFormatType.DD_MMM:
+                dt_value = (day + '_' + monthE).toUpperCase();
+                break;
+            case DateFormatType.DDMMYY:
+                dt_value = day + month + year.substr(2, 2);
+                break;
+            case DateFormatType.DD_MM_YY:
+                dt_value = day + '_' + month + '_' + year.substr(2, 2);
+                break;
+            case DateFormatType.HHMM:
+                dt_value = hour + minute;
+                break;
+            default:
+                dt_value = day + monthE + year.substr(2, 2);
+                break;
+        }
+        this.Append(dt_value);
+    }
+
+    // // endregion
+
+    // // region 2: Extraction
+    //     /// <summary>
+    //     /// Get message code from reply message
+    //     /// </summary>
+    //     /// <returns>byte</returns>
+    public GetMsgCode(): number {
+        return this.GetByte(0);
+    }
+    //     /// <summary>
+    //     /// Get error message while reply message code is MC_ERR_REPLY
+    //     /// </summary>
+    //     /// <returns></returns>
+    public GetErrorText() {
+        if (this.store.length > 1) {
+            const buf = this.GetBytes(1, this.store.length - 1);
+            const result = ByteArrayBuilder.BytesToString(buf);
+
+            return result;
+            // return Encoding.ASCII.GetString(store.ToArray(), 1, this.Length - 1);
+        } else {
+            return '';
+        }
+    }
+
+    //     /// <summary>
+    //     /// To read a character from reply message
+    //     /// </summary>
+    //     /// <param name="offset">The stream position which to begin read form current stream with default one byte</param>
+    //     /// <returns>char</returns>
+    public GetChar(offset: number): string {
+        const buf = this.GetBytes(offset, 1);
+        const result = ByteArrayBuilder.BytesToString(buf);
+        return result;
+
+        // byte[] buffer = new byte[1];
+        // buffer = GetBytes(offset, 1);
+        // return Encoding.GetEncoding(Constansts.ENCODING_UTF8).GetChars(buffer)[0];
+    }
+    //     /// <summary>
+    //     /// To read a byte from reply message
+    //     /// </summary>
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     /// <returns>byte</returns>
+    GetByte();
+    GetByte(offset: number): number;
+    public GetByte(b?, b1?) {
+        const btypestr = typeof b;
+        if (btypestr === 'number') {
+            return this.GetBytes(b, 1)[0];
+        } else {
+            this.CheckSteam();
+            return this.store_ReadByte();
+        }
+    }
+
+    //     /// <summary>
+    //     /// To read byte array from reply message
+    //     /// </summary>
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     /// <returns>byte[]</returns>
+
+    public GetBytes(offset: number, len: number): Buffer {
+        this.store_Seek(offset);
+        this.CheckSteam(offset);
+        const buffer = this.store_ReadBytes(len);
+        return buffer;
+
+        // byte[] buffer = new byte[len];
+        // store.Seek(offset, SeekOrigin.Begin);
+        // CheckSteam(offset);
+        // store.Read(buffer, 0, len);
+        // return buffer;
+    }
+
+    //     /// <summary>
+    //     /// To read fix string from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInFixStr
+    //     ///
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     ///
+    //     /// <returns>string</returns>
+    public ExtractFixStr(offset: number, len: number) {
+        const buf = this.GetBytes(offset, len);
+        const result = ByteArrayBuilder.BytesToString(buf);
+        return result;
+        // byte[] buffer = new byte[len];
+        // buffer = GetBytes(offset, len);
+        // return Encoding.GetEncoding(Constansts.ENCODING_UTF8).GetString(buffer);
+    }
+
+    //     /// <summary>
+    //     /// Convert a N9 data to an integer from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInN9, default form is N9
+    //     ///
+    //     /// Example:
+    //     /// '@' will be converted 0, A will be converted 1
+    //     ///
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     ///
+    //     /// <returns>integer</returns>
+    public ExtractN9(offset: number, len: number) {
+        let result = 0;
+        // byte[] buffer = new byte[len];
+        for (let i = 0; i < len; i++) {
+            this.store_Seek(offset + i);
+            const b = this.GetByte();
+            const r = b & ~this.BIT6;
+            if (r > 9) {
+                logger.error(
+                    `N9 data out of range, data:${this.ToString()}, position:${
+                        this.Position
+                    }.`
+                );
+                throw new ComSvrException(
+                    ERROR_MSG.RID_COMSERV_ERR_N9DATAOUTOFRANGE
+                );
+            }
+
+            result = result * 10;
+            result += r;
+        }
+        return result;
+    }
+
+    //     /// <summary>
+    //     /// Convert a odds value  to an integer from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Stream Position Process
+    //     /// No     Ending                 Action(position)                       Remark
+    //     /// 1:     non 0-9(+,/,etc)       position-1                             no decimal dight
+    //     /// 2:     eos           N/A                                             no decimal dight
+
+    //     /// 3:     '.'                   contine reading
+    //     ///                             a) one decimal  digit  (No.1,2)          with decimal dight
+    //     ///                             b) two decimal  digit  (No.1,2)          with decimal dight
+    //     ///                             c) three decimal digit ( N/A  )          with decimal dight
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInOdds
+    //     ///
+    //     /// Example:
+    //     /// ">AB.CD" will convert to 1234
+    //     ///
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     ///
+    //     /// <returns>integer</returns>
+    public ExtractOdds(offset: number) {
+        let result = 0;
+        let hasDot = false;
+        let readOneMoreDigit = false;
+        const startWith = this.GetByte(offset);
+        if (startWith !== '>'.charCodeAt(0)) {
+            logger.error(
+                `Odds must started with '>', data:${this.ToString()}, position:${
+                    this.Position
+                }.`
+            );
+            throw new ComSvrException(
+                ERROR_MSG.RID_COMSERV_ERR_ODDSSTARTFORMATERROR
+            );
+        }
+        while (!this.EOS) {
+            const currByte = this.GetByte();
+            if (currByte === '.'.charCodeAt(0)) {
+                hasDot = true;
+                break;
+            } else {
+                const tmp = currByte & ~this.BIT6;
+                if (tmp > 9) {
+                    readOneMoreDigit = true;
+                    break;
+                }
+                result = result * 10;
+                result += tmp * 1000;
+            }
+        }
+        if (hasDot) {
+            let mply = 100;
+            while (!this.EOS) {
+                const b = this.GetByte();
+                if (b === '+'.charCodeAt(0) || b === '/'.charCodeAt(0)) {
+                    readOneMoreDigit = true;
+                    break;
+                } else {
+                    const tmp = b & ~this.BIT6;
+                    if (tmp > 9) {
+                        readOneMoreDigit = true;
+                        break;
+                    }
+                    result += tmp * mply;
+                    mply /= 10;
+                }
+            }
+        }
+        // Because the length of odds is unsured and should read one byte to end,so we need set position-1
+        if (readOneMoreDigit) {
+            this.store_Seek(this.store_Position - 1);
+            // store.Seek(store.Position - 1, SeekOrigin.Begin);
+        }
+        return result;
+    }
+
+    //     /// <summary>
+    //     /// Extract DDMMMYY format to a DateTime value from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInDDMMMYY
+    //     ///
+    //     /// Example:
+    //     /// "25DEC81" will convert to Datetime:1981-12-25
+    //     ///
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     ///
+    //     /// <returns>DateTime</returns>
+    public ExtractDateFormDDMMMYY(offset: number, len: number): Date {
+        // string date_str = ExtractFixStr(offset, len);
+        // return ConvertToDateTime(date_str, DateFormatType.DDMMMYY);
+        const date_str = this.ExtractFixStr(offset, len);
+        return this.ConvertToDateTime(date_str, DateFormatType.DDMMMYY);
+    }
+
+    //     /// <summary>
+    //     /// To read a set of bits from memorystream(low->high)
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInBitmap
+    //     ///
+    //     /// Example:
+    //     /// 'A' will return byte array:10000100
+    //     ///
+    //     /// <param name="offset">The stream position which to begin read form current stream</param>
+    //     /// <param name="len">The number of bytes to read</param>
+    //     ///
+    //     /// <returns>List<byte></returns>
+    public ExtractBitmap(offset: number, len: number): Buffer {
+        // List < byte > result = new List<byte>();
+        const result = [];
+        const bytes = this.GetBytes(offset, len);
+        for (let j = 0; j < bytes.length; ++j) {
+            const b = bytes.readUInt8(j);
+            for (let i = 1; i <= 8; i++) {
+                const newbyte = (b & (1 << (i - 1))) > 0 ? 1 : 0;
+                result.push(newbyte);
+            }
+        }
+        // foreach(var b in bytes)
+        // {
+        //     for (int i = 1; i <= 8; i++)
+        //     {
+        //         var newbyte = (b & (1 << i - 1)) > 0 ? 1 : 0;
+        //         result.Add((byte)newbyte);
+        //     }
+        // }
+        return Buffer.from(result);
+    }
+
+    //     /// <summary>
+    //     /// Eextract money data with a start index from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Stream Position Process                                Remark
+    //     /// No     Ending   Action(position)
+    //     /// 1:    '-'       N/A                                    No decimal
+    //     /// 2:    $         position-1                             No decimal ('$','/',etc)
+    //     /// 3:    '/'       position-1                             No decimal ('$','/',etc)
+    //     /// 4:    eos       N/A                                    No decimal
+    //     /// 5:    '.'       contine reading
+    //     ///                 a) one decimal digit  (No.1,2,3,4)     One decimal
+    //     ///                 b) two decimal digit  (No.1,2,3,4)     One decimal
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInMoney
+    //     ///
+    //     /// Example:
+    //     /// "$12.34" will be converted to 1234
+    //     /// "$23.45-" will be converted to -2345
+    //     ///
+    //     /// <param name="offset">start index</param>
+    //     ///
+    //     /// <returns>integer</returns>
+    public ExtractMoney(offset: number, len = -1) {
+        let result = 0;
+        let currByte = 0;
+        const dp = 2; // 2 decimal point
+        const startWith = this.GetByte(offset);
+        if (startWith !== Constansts.DOLLAR_SIGN.charCodeAt(0)) {
+            logger.error(
+                `Money value must started with '$ , data:${this.ToString()}, position:${
+                    this.Position
+                }.`
+            );
+            throw new ComSvrException(
+                ERROR_MSG.RID_COMSERV_ERR_MONEYSTARTFORMAT
+            );
+        }
+        offset++;
+
+        // reads in digits until decimal point or non-decimal digit is found
+        while (!this.EOS) {
+            currByte = this.GetByte(offset);
+            if (currByte === '.'.charCodeAt(0)) {
+                break;
+            }
+            const tmp = currByte & ~this.BIT6;
+            if (tmp > 9) {
+                break;
+            }
+            result *= 10;
+            result += tmp * 100;
+            offset++;
+        }
+
+        // read in 0-2 digits after decimal point
+        //  extra 2 digits for FlexiBet will be handled in the next if loop
+
+        if (currByte === '.'.charCodeAt(0)) {
+            // skip '.'
+            offset++;
+            let mply = 10;
+            for (let i2 = 0; i2 < dp; i2++) {
+                if (this.EOS) {
+                    break;
+                }
+                currByte = this.GetByte(offset);
+                const tmp = currByte & ~this.BIT6;
+                if (tmp > 9) {
+                    // one digit after decimal dot
+                    break;
+                }
+                result += tmp * mply;
+                mply /= 10;
+                offset++;
+            }
+        }
+
+        this.store_Seek(offset);
+        if (!this.EOS) {
+            // check sign
+            currByte = this.GetByte(offset);
+            if (currByte === '-'.charCodeAt(0)) {
+                result = 0 - result;
+                offset++;
+            } else {
+                if (len - dp > 0) {
+                    offset++; // 3rd decimal point
+                    if (len - dp - 1 > 0) {
+                        offset++; // 4rd decimal point
+                    }
+                }
+                // check sign
+                currByte = this.GetByte(offset);
+                if (currByte === '-'.charCodeAt(0)) {
+                    result = 0 - result;
+                    offset++;
+                }
+            }
+        }
+        this.store_Seek(offset);
+        // store.Seek(offset, SeekOrigin.Begin);
+        return result;
+    }
+
+    //     /// <summary>
+    //     /// To extract money data with current position of memorystream from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// CScmpInMoney
+    //     ///
+    //     /// Example:
+    //     /// "$12.34" will be converted to 1234
+    //     /// "$23.45-" will be converted to -2345
+    //     ///
+    //     /// <returns>integer</returns>
+    public ExtractMoney_(): number {
+        return this.ExtractMoney(this.store_Position);
+    }
+
+    //     /// <summary>
+    //     //To extract a sequence of hex value from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpInNF(Bcd6)
+    //     ///
+    //     /// Example
+    //     /// 0x480x470x42(HHB) will be converted to "872"
+    //     ///
+    //     /// <param name="offset">start index</param>
+    //     /// <param name="len">get the byte count</param>
+    //     /// <returns>string</returns>
+    public ExtractNF(offset: number, len: number): string {
+        let result = '';
+
+        for (let i = 0; i < len; i++) {
+            let tmp = 0;
+            const b = this.GetByte(offset + i); // 0x48
+            if (b >= '@'.charCodeAt(0) && b <= 'I'.charCodeAt(0)) {
+                // 0-9
+                tmp = b & ~this.BIT6; // 0x08
+                const s = tmp.toString(16).toUpperCase(); // "8"
+                result += s;
+            } else if (b >= 'J'.charCodeAt(0) && b <= 'O'.charCodeAt(0)) {
+                // A-F
+                tmp = b & ~this.BIT6;
+                const s = tmp.toString(16).toUpperCase();
+                result += s;
+            } else {
+                logger.error(
+                    `NF data out of range, data:${this.ToString()}, position:${
+                        this.Position
+                    }.`
+                );
+                throw new ComSvrException(
+                    ERROR_MSG.RID_COMSERV_ERR_NFDATAOUTOFRANGE
+                );
+            }
+        }
+        return result;
+    }
+
+    //     /// <summary>
+    //     //To extract a sequence of hex value from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpInNF(Ascii)
+    //     ///
+    //     /// Example:
+    //     ///             "A"-->0xa0;
+    //     //              "AB"->0xAB;
+    //     //              "ABCD"--> 0xAB,0xCD;
+    //     //              "ABC"-->0xAB,0xC0, and so on.
+    //     ///
+    //     /// <param name="offset">start index</param>
+    //     /// <param name="len">get the byte count</param>
+    //     /// <returns>byte[]</returns>
+    public ExtractNF_Ascii(offset: number, len: number): Buffer {
+        const arr = Buffer.alloc(len);
+        let odd = true;
+        let index = 0;
+        for (let i = 0; i < len; i++) {
+            let tmp = 0;
+
+            const b = this.GetByte(offset + i);
+
+            if (b >= '0'.charCodeAt(0) && b <= '9'.charCodeAt(0)) {
+                tmp = b - '0'.charCodeAt(0); // convert ascii('3') to number(3), the same as function atoi in C++.
+            } else if (b >= 'A'.charCodeAt(0) && b <= 'F'.charCodeAt(0)) {
+                tmp = b - 'A'.charCodeAt(0) + 10; // convert ascii('B') to number(0x0B)
+            } else {
+                logger.error(
+                    `NF data out of range, data:${this.ToString()}, position:${
+                        this.Position
+                    }.`
+                );
+                throw new ComSvrException(
+                    ERROR_MSG.RID_COMSERV_ERR_NFDATAOUTOFRANGE
+                );
+            }
+            //
+            if (odd) {
+                arr[index] = tmp << 4;
+                odd = false;
+            } else {
+                arr[index] |= tmp;
+                index++;
+                odd = true;
+            }
+        }
+        return arr;
+    }
+    //     /// <summary>
+    //     //To extract a BIN6 value from reply message
+    //     /// </summary>
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpInNF(Bin6)
+    //     ///
+    //     /// Example:
+    //     ///             0x40('@')-->0x30('0');
+    //     //              0x7f(127)->0x3f(63);
+    //     ///
+    //     /// <param name="offset">start index</param>
+    //     /// <param name="len">must set 1</param>
+    //     /// <returns>byte</returns>
+    public ExtractNF_BIN6(offset: number): number {
+        let result = 0;
+        this.store_Seek(offset);
+        const b = this.GetByte();
+        const r = b & ~this.BIT6;
+        if (r > 63) {
+            logger.error(
+                `NF data out of range, data:${this.ToString()}, position:${
+                    this.Position
+                }.`
+            );
+            throw new ComSvrException(
+                ERROR_MSG.RID_COMSERV_ERR_NFDATAOUTOFRANGE
+            );
+        }
+        result = r;
+        return result;
+    }
+
+    //     /// <summary>
+    //     /// To extract bonus from reply message, need start index parameter only.
+    //     /// </summary>
+    //     ///
+    //     /// Stream Position Process
+    //     /// No     Ending        Action(position)                       Remark
+    //     /// 1:     non 0-9       position-1                             no decimal dight
+    //     /// 2:     eos           N/A                                    no decimal dight
+
+    //     /// 3:    '.'           contine reading
+    //     ///                     a) one decimal digit  (No.1,2)          with decimal dight
+    //     ///                     b) two decimal digit  (  N/A )          with decimal dight
+    //     ///
+    //     /// Corresponding Medthod:
+    //     /// 1:CScmpInBonus
+    //     ///
+    //     /// Example
+    //     /// AB.CD -> 12.34
+    //     ///
+    //     /// <param name="offset">start index</param>
+    //     /// <returns>long</returns>
+    public ExtractBonus(offset: number): number {
+        let result = 0;
+        let readOneMoreDigit = false;
+        // reads in digits until decimal point or non-decimal digit is found
+        let i = 0;
+        while (!this.EOS) {
+            const currByte = this.GetByte(offset + i);
+            if (currByte === '.'.charCodeAt(0)) {
+                break;
+            }
+            const tmp = currByte & ~this.BIT6;
+            if (tmp > 9) {
+                readOneMoreDigit = true;
+                break;
+            }
+            result *= 10;
+            result += tmp * 100;
+            i++;
+        }
+        // read in 0-2 digits after decimal point
+        //  extra 2 digits for FlexiBet will be handled in the next if loop
+        const btDot = this.GetByte(offset + i);
+        if (btDot === '.'.charCodeAt(0)) {
+            let mply = 10;
+            i++;
+            const dp = 2; //  2 decimal point
+            for (let i2 = 0; i2 < dp; i2++) {
+                if (this.EOS) {
+                    break;
+                }
+                const b2 = this.GetByte(offset + i);
+                const tmp = b2 & ~this.BIT6;
+                if (tmp > 9) {
+                    // one decimal
+                    readOneMoreDigit = true;
+                    break;
+                }
+                result += tmp * mply;
+                mply /= 10;
+                i++;
+            }
+        }
+        // Because the length of bonus is unsured and should read one byte to end,so we need set position-1
+        if (readOneMoreDigit) {
+            this.store_Seek(this.store_Position - 1);
+        }
+        return result;
+    }
+
+    //     /// <summary>
+    //     /// Extract an int value from reply message, such as pay count
+    //     /// </summary>
+    //     ///
+    //     /// Set BIT6 off for every byte
+    //     ///
+    //     /// <returns>int</returns>
+    public ExtractBcdInt(): number {
+        let result = 0;
+        while (true) {
+            let b = this.GetByte();
+            b = b & ~this.BIT6;
+            if (b > 9 || b < 0) {
+                break;
+            }
+
+            result *= 10;
+            result += b;
+        }
+
+        this.store_Seek(this.store_Position - 1);
+        return result;
+    }
+
+    /// <summary>
+    /// Look for a character behind the offset position
+    /// </summary>
+    ///
+    /// <param name="offset">start index</param>
+    ///
+    /// <returns>int, the position the byte at start from offset, if return -1 means found nothing</returns>
+    public ExtractFindByte(offset: number, find: number): number {
+        let result = -1;
+        const storePos = this.Position;
+
+        while (!this.EOS) {
+            const b = this.GetByte();
+            if (b === find) {
+                result = this.Position - offset - 1;
+                break;
+            }
+        }
+
+        this.store_Seek(storePos);
+        return result;
+    }
+    // endregion
+
+    // region 3: Interaction
+    /// <summary>
+    /// Clear all content from the builder
+    /// </summary>
+    public Clear() {
+        // store.Close();
+        // store.Dispose();
+        this.store = new BufferBuilder(0x1000);
+    }
+    /// <summary>
+    /// Rewind the builder ready to read data
+    /// </summary>
+    public Rewind() {
+        this.store_Seek(0);
+    }
+
+    /// <summary>
+    /// Returns the builder as an array of bytes
+    /// </summary>
+    /// <returns></returns>
+    public ToArray(): Buffer {
+        return this.store.get();
+    }
+    // endregion
+
+    ConvertToN9(str: string): string {
+        let result = '';
+        const lst: number[] = [];
+
+        for (let i = 0; i < str.length; ++i) {
+            const data = str[i];
+            if (data >= '0' && data <= '9') {
+                const b = (parseInt(data, 10) - parseInt('0', 10)) | this.BIT6;
+                lst.push(b);
+            } else {
+                logger.error(`N9 data out of range, data:${str}`);
+                throw new ComSvrException(
+                    ERROR_MSG.RID_COMSERV_ERR_N9DATAOUTOFRANGE
+                );
+            }
+        }
+        result = ByteArrayBuilder.BytesToString(lst);
+        return result;
+    }
+
+    // // endregion
+
+    // region Overrides
+    /// <summary>
+    /// Returns a text based (Base64) string version of the current content
+    /// </summary>
+    /// <returns></returns>
+    public ToString(): string {
+        return this.store.get().toString();
+    }
+    // endregion
+
+    // // region Private Methods 可能需要修正！！！**********************************************
+    private ConvertToDateTime(
+        dtstr: string,
+        dtFormat = DateFormatType.DDMMMYY
+    ): Date {
+        let result: Date;
+        // Initializes a new en-us culture info
+        // CultureInfo culture = new CultureInfo("en-US");
+        switch (dtFormat) {
+            // case DateFormatType.YY:
+            //    dt_value = dt.ToString("yy");
+            //    break;
+            case DateFormatType.DDMMMYY:
+                result = new Date(dtstr);
+                // result = DateTime.ParseExact(dtstr, "ddMMMyy", culture);
+                break;
+            // case DateFormatType.DD_MMM_YY:
+            //    dt_value = dt.ToString("dd_MMM_yy").ToUpper();
+            //    break;
+            // case DateFormatType.DD_MMM:
+            //    dt_value = dt.ToString("dd_MMM").ToUpper();
+            //    break;
+            // case DateFormatType.DDMMYY:
+            //    dt_value = dt.ToString("ddMMyy");
+            //    break;
+            // case DateFormatType.DD_MM_YY:
+            //    dt_value = dt.ToString("dd_MM_yy");
+            //    break;
+            // case DateFormatType.HHMM:
+            //    dt_value = dt.ToString("hhmm");
+            //    break;
+
+            default:
+                result = new Date(dtstr);
+                // result = DateTime.ParseExact(dtstr, "ddMMMyy", culture);
+                break;
+        }
+        return result;
+    }
+
+    Append(b: number | Buffer | string | boolean); // Append(byte b),Append(byte[] b)
+    Append(str: string, n9: boolean); // Append(string str, bool n9)
+    Append(str: string, len: number, n9: boolean);
+    public Append(b?, b1?, b2?): void {
+        const btypestr = typeof b;
+        const b1typestr = typeof b1;
+        const b2typestr = typeof b2;
+
+        if (
+            btypestr === 'string' &&
+            b1typestr === 'number' &&
+            b2typestr === 'boolean'
+        ) {
+            let str = b;
+            const len = b1;
+            const n9 = b2;
+            while (str.length < len) {
+                str = '0' + str;
+            }
+            if (n9) {
+                str = this.ConvertToN9(str);
+            }
+            this.Append(str);
+        } else if (btypestr === 'string' && b1typestr === 'boolean') {
+            this.Append(b, b.length, b1);
+        } else if (btypestr === 'number') {
+            this.store_AppendByte(b);
+        } else if (btypestr === 'object') {
+            this.AddBytes(b);
+        } else if (btypestr === 'string') {
+            this.store_AppendString(b);
+        } else if (btypestr === 'boolean') {
+            this.store_AppendByte(b ? this.streamTrue : this.streamFalse);
+        }
+    }
+
+    //     /// <summary>
+    //     /// Add a string of raw bytes to the store
+    //     /// </summary>
+    //     /// <param name="b"></param>
+    private AddBytes(b: Buffer) {
+        this.store_AppendBuffer(b);
+    }
+
+    CheckSteam(): void;
+    CheckSteam(offset: number);
+    public CheckSteam(b?) {
+        const btypestr = typeof b;
+        if (btypestr === 'number') {
+            if (this.store_Position > this.store.length) {
+                logger.error(
+                    `Argument offset is over stream length, data:${this.ToString()}, position:${
+                        this.Position
+                    }.`
+                );
+                throw new ComSvrException(ERROR_MSG.RID_SYS_ERR_EXCEPTION);
+            }
+            if (this.store_Position !== b) {
+                logger.error(
+                    `Argument offset is not equal MemoryStream position, data:${this.ToString()}, position:${
+                        this.Position
+                    }.`
+                );
+                throw new ComSvrException(ERROR_MSG.RID_SYS_ERR_EXCEPTION);
+            }
+        } else {
+            if (this.store_Position > this.store.length) {
+                logger.error(
+                    `Argument offset is over stream length, data:${this.ToString()}, position:${
+                        this.Position
+                    }.`
+                );
+                throw new ComSvrException(ERROR_MSG.RID_SYS_ERR_EXCEPTION);
+            }
+        }
+    }
+    // // endregion
+
+    // // region IDisposable Implememntation
+    //     /// <summary>
+    //     /// Dispose of this builder and it's resources
+    //     /// </summary>
+    //     public void Dispose()
+    // {
+    //     if (store != null) {
+    //         store.Close();
+    //         store.Dispose();
+    //     }
+    // }
+    // endregion
 }
